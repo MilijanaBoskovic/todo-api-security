@@ -1,0 +1,338 @@
+User model will contain:
+=> email
+=>tokens- array of objects-login tokens- different authentication tokens for different devices
+          =>access property- will specify token type, we will use only 'auth'
+          =>token value-crypted, this is the string we will pass back and foward
+                        when user wants to make secure request he will send this along with http request
+                        and we will be able to validate that the user has indead access to do what they want to do
+                        whether that is adding, deleting or updating the todo
+
+*validating emails: we will use validating library: mongoose custom validation=> custom validators section
+                  => first we need to set this atribute to email object in model: validate:{
+                                                                                      validator:(value)=>{
+
+                                                                                      },
+                                                                                      message:`${valude} is not valid`
+                                                                                  }
+                  => validators function is called with value we need to validate and returns true if value is valid
+                  =>we need to install validator module and use its function inside of validator
+                  =>npm install validator@5.6.0 --save
+                  =>we need to set tokens atribute also
+                  => inside of it we will specify all properties available on a token
+                  tokens:[{
+                    access:{
+                      type: String,
+                      required:true
+                    },
+                    token:{
+                      type: String,
+                      required:true
+                    }
+                  }]
+=> we need to make post route for login
+  app.post('/users',(req,res)=>{
+          var body= _.pick(req.body,['email','password']);
+          var user= new User(body);
+          user.save().then( (user)=>{ res.send(user); }).catch((e)=>{res.status(400).send(e)});
+});
+=>before doing request in postman we need to turn of server on port 3000 and drop todo database
+=>after that we can send some json data to localhost:3000/users from postman
+----------------------------------------------------------------------------------------
+ATENTION:
+validate:{
+  validator:(value)=>{
+    return validator.isEmail(value);
+  },
+is the same as we only pass method that should be used like: validator: validator.isEmail
+----------------------------------------------------------------------------------------
+----------------------------------------
+HASHING AND JSON WEB tokens
+---------------------------------------
+-using this we will be able to set up authentication for our app
+-our of our routes are public right now,anybody can hit this and manipulate data
+-with authentication this will be private routes meaning you will have to be loged in and manipulate data that you are actually own
+=> we will create token system: => we can think about token as a string which is going to be sent back from our signup and login requests
+                                => the client is then is going to take this token and use it to authenticate other requests
+                                =>it will simple passing along as header to request and it is going to be able to make that call succesfuly after authenticate
+HASHING
+------------
+*we will install module which contains a lot of crypto algorithms: npm i crypto-js@3.1.6 --save
+*sha256: all we need to do to hash a value is to pass to sha256 function:
+=> var hash=SHA256(some_string).toString();
+=>hashing is one way algorithm,meaning giving this message we will always get this result but we cant get original message back if we have result
+
+**we will use hashing in the similar way as sourceforge:
+  => which lets you verify that the file you have downloaded is the one you acctually wanted because it hashes the file
+  => and shows you hash value, this means you can hash file later if you get the same result you knows that that is the file
+  => source forge wanted you to get and if you get the different result oposite and you probably shouldnt use it because it could have viruses inside.
+  => this is the exact technique we will use for our token and this is not going to pervent someone in the middle from seeing the value,
+  => we will use htttps for that,we will securly transport our tokens.
+  => This will however going to pervent someone on the client to gets the value from manipulating the id and changing it to something else
+----for example if we send back the token and that token says This is for user number 3. The user than gets the token and change it to user number 4
+  =>and tries to delete someone elses data
+  =>what we can do is to use hashing to make shure that that value,the id,does not acctualy get changed,if it does
+  =>we will be able to spot that change and be able to deny user access because we know that they never actualy get that token from us
+  =>they probably created token on their own.
+
+---for example: if we talk about data that we want to send from server to the client
+              =>if we have object data with id property with value of 4,which will be equal to the users id from the users collection
+              =>this is going to lets us to know which user should be able to make their request
+              => for example: if I try to delete the note with id of 3,but the user who created that does not match the id of token
+              =>then I know that it shouldnt be able to delete that because it is not their data
+              =>if data object is data we want to send to the client
+              =>the important part is making shure that the client does not set different id, send the token back to us AND
+              =>say hi go ahed and delete all notes for user number 5, that would be big security flow
+              =>instead we are going to create separate variable called the token and this we are going to sent to the user
+              =>the token variable is going to contain the data property and hash which is going to be hashed value of the data
+              =>if the data changes later on and we rehash it we are not going to get same value back so we will be able to tell
+              =>that the data was manipulated by the client and we should not expect to be valid
+              var data={
+                id: 4
+              };
+              var token={
+                data,
+                hash: SHA256(JSON.stringify(data)).toString()
+              };
+  -------------------------------------------
+  JWT
+  --------------------------------------------
+              =>this token is not fullprof,for example,let say that the user changes data id property, all they have to do is rehash
+              =>that data,add it on to hash property, send the token back and they tehnicly will trick us
+              =>what we are going to do to pervent this is salt the hash=>
+              =>it means you add something on to the hash that is unique and changes the value
+              =>for example if we hash the string password we are going to get same result every time but if we hash it with some
+              =>randomly generated value we will get different result,as long as we use different salt every single time
+              =>hash: SHA256(JSON.stringify(data)+ 'somesecret').toString() =>this is going to salt our hash
+              =>now the user would not be able to manipulate this data anymore, they could change the id, they could try to rehash
+              =>but they are not going to have secret so hash is going to be bad
+              =>when then we try to verify the hash later on we will see that and deny access for that request
+              =>This principle is the standard called JWT-JSON WEB TOKEN.
+              =>there are libraries providing this, https://jwt.io : npm i jsonwebtoken@7.1.9 --save
+              =>which we are going to use instead of crypto-js
+              =>we get two functions:
+              1)to create token: sign- takes the data object, creates hash and returns the token value
+              2) to verify it: verify- does the opposite, it takes the token and the secret and makes shure that the data is not manipulated
+                            var token= jwt.sign(data,'123abc');
+                            console.log(token);
+                            var decoded=jwt.verify(token,'123abc');
+                            console.log(decoded);
+-------------------------------------------
+INTEGRATION TO PROJECT
+--------------------------------------------
+*in post users currently we are not returning authentication token,the user need to sign up and then use separate log in request
+ *we will explore module and instance methods for getting authentication done
+ 1.model methods-are called on uppercase User object,they dont require individual document
+                 ---for example: User.findByToken- will take jwt token that the user sends in secure request, we will find individual user
+                                                   and we will return that user to the caller
+ 2.instance methods-are called on individual user
+                   ---for example: user.generateAuthToken- which will add token upon individual user document saving that and
+                                                           returning the token so we can send it back to the user
+ *UserSchema.mehods is object on which we can add any method we want and this are going to be instance methods
+                    =>instance methods have acces to individual documents, and we need that information in order to create JWT
+                    =>we will use regular functions beacuse arrow functions dont bind this keyword, and we need this keyword for our methods
+                    =>because this keyword stores individual document
+---for example:
+                    UserSchema.methods.generateAuthToken= function()
+                    {
+                      var user=this;
+
+                      var access='auth';
+                      var token= jwt.sign({_id: user._id.toHexString(), access},'abc123').toString();
+
+                      user.tokens.concat([{access,token}]);
+
+                      return user.save()
+                                    .then(()=>{
+                                        return token;
+                                        });
+                    };
+                    => sign function accepts two arguments and returns object:
+                         => first argument of sign function is object that has the data we want to sign
+                         => second argument is some secret value
+                    => after that we need to update tokens array, we need to push this new object with those two properties
+                    => now we have changes made to a user model and at last we need to save those changes
+                    => currently we update local user model but we dont save it
+                    => user.save returns promise in then we can pass success callback function and return token
+                    => we will do this so later in the server file we can grab the token by adding other then callback getting access
+                    =>to the token and then responding inside a callback function
+                    =>in order to allow server.js to chain on the promise we will return all statement user.save()....
+                    => and the value o token will be passed as the success argument for the next then call
+  => now we can generate token by calling the method and add it as header in server.js:
+
+  app.post('/users',(req,res)=>{
+
+    var body= _.pick(req.body,['email','password']);
+    var user= new User(body);
+
+    user.save()
+      .then( ()=>
+      {
+        return user.generateAuthToken(); //we are returning because we want chaining
+      })
+      .then((token)=>
+      {
+        res.header('x-auth','token').send(user); //we want to send token in http header
+      })                                         //header has two arguments which are key/value pairs where key is header name and the value is the value you want to set header to, when you prefix header name with x- it means we are creating custom header
+      .catch((e)=>
+      {
+        res.status(400).send(e)
+      });
+  });
+-----------------------------------------
+* if we want to limit data we sent back,when we convert some of our instances into json value
+=>there is toJSON method available that we can acctualy override which means we can only sent back certan values
+=>we dont want to send back to the user secure properties as password or tokens
+
+UserSchema.methods.toJSON=function()
+{
+  var user=this;
+  var userObject=user.toObject();
+  return _.pick(userObject,['_id','email']);
+};
+--------------------------------------------------------------------------------------
+PRIVATE routes
+--------------------------------------------------------------------------------------
+*This means that we will require x-auth token, validate that token, find the user associated with that token
+ and then and only then you will be able to run the route code
+ *we will add express middleware wich will done all of that verification and authentication for us
+
+*we will make new route to url /users/me and  we will use http get method to access
+=> this route will require authentication which means you need to provide valid x-auth token
+=>it is going to find associated user and it is going to send that user back
+
+  UserSchema.statics.findByToken= function(token){  //.statics -everything you add on it become model method
+    var User=this;                                  //in case of model methods this is relay on model not instance
+    var decoded;
+    try
+    {
+      decoded= jwt.verify(token, 'abc123');         //verify will throw a error if token value was manipulated or secrets doesnt match
+    }
+    catch(e)
+    {
+      // return new Proise((resolve,reject)=>{ reject();});  //we will return the promise which will always get rejected to servers catch catch it
+      return Promise.reject();                               //this is the same
+    }
+    return User.findOne({                           //if we access to succesfuly decode token we will try to find associated user
+      _id: decoded._id,
+      'tokens.token': token,                       //when we use nested documents in query we need ''
+      'tokens.access':'auth'
+    });
+};
+
+app.get('users/me',(req,res)=>{
+
+  var token=req.header('x-auth'); //header method on request has only key argument- name of header
+
+  User.findByToken(token).then((user)=>{
+    if(!user)                              //it might be null if there is no user who passed the query
+    {
+      return Promise.reject();            //it will also be catched by chatch(e)
+    }
+    res.send(user);
+  })
+  .catch(e)=>{
+    res.status(401).send();   //401-authentication has failed
+  };
+});
+
+*we need to send request to /user/me and in headers section we need to provide token x-auth with some valid token from database
+-----------------------------
+authentication middleware
+------------------------------
+*we want all of our routes use it, we will use it on our routes to make them private
+*actual route will not be called until next is called in middleware
+
+var authenticate=(req,res,next)=>{
+  var token=req.header('x-auth');
+
+  User.findByToken(token).then((user)=>{
+    if(!user)
+    {
+      return Promise.reject();
+    }
+    req.user=user;                          //we will modify request object so we can use it inside of route
+    req.token=token;
+    next();
+  }).catch((e)=>{
+    res.status(401).send();                 //we will not call next because we dont want to call app.get in case of error
+  });
+};
+app.get('/users/me',authenticate,(req,res)=>{  //to add a middleware we simply reference function as argument
+
+  res.send(req.user);
+});
+--------------------------------------------------------------------------------------
+HASHING PASSWORDS BEFORE SENDING THEM TO DATABASE
+--------------------------------------------------------------------------------------
+*we will validate plain text version,then we will hash it,salt it and store it in a database
+=>we will use algorithm called bcrypt - it has salting built in : npm package
+=> npm i bcryptjs@2.3.0 --save
+*we need to call 3 methods:
+1) genSalt - this will generate salt which we will use to salt our password:
+ *it takes two arguments and it is async method
+  1) num of rounds you want to use to generate the salt
+  2) callback function which takes err and salt in which we will do the hashing
+  ---for example:
+                  bcrypt.genSalt(10,(err, salt)=>{
+
+                    bcrypt.hash(password,salt, (err,hash)=>{
+
+                    });
+                  });
+2) hash method: takes three arguments:
+    1)thing we want to hash
+    2)salt to use
+    3)callback function with err and the hash value which we want to store in our database
+3) compare function:takes three arguments
+  1) plain text password
+  2) hashed password
+  3) callback function with res and err where res is true if they are match
+
+  bcrypt.compare(pass,hashedPassword,(err,res)=>{
+      console.log(res);
+  });
+=> we want to add this in our user file =>we need mongoose middleware
+=> it lets you run certain code before or after certain events, for example update event- we can run some code before updating the model
+=> in our case we want to run some code before document is saved
+=> we need to modify our user Schema:
+UserSchema.pre('save',function(next){
+
+  var user=this;                      //we need access to individual document
+  if(user.isModified('password'))
+  {
+    bcrypt.genSalt(10,(err, salt)=>{
+      bcrypt.hash(user.password, salt, (err,hash)=>{
+        user.password=hash;
+      });
+    });
+    next();
+  }
+  else
+  {    next();  }
+});
+---------------------------------------------------------
+TESTING
+---------------------------------------------------------
+*for seed database for testing purpose we made seed.js file
+ATTENTION:
+----------------
+const populateUsers=(done)=>
+{
+  User.remove({}).then(()=>{
+    var userOne=new User(users[0]).save(); //save returns promise
+    var userTwo=new User(users[1]).save();
+    return Promise.all([userOne,userTwo]);
+}).then(()=>done());
+};
+=> we populate users like this because we need save call to trigger event for mongoose middleware
+  which we need for hashing passwords
+=> after that we use Promise.all function which accepts array of promises and after both being resolved then will be called
+
+=>in server.test.js we : beforeEach(populateUsers); and the same for todos
+---------------------------------------------------------------------------------
+*we use request(app).get('/users/me').set('x-auth',users[0].tokens[0].token)... to set the header of request, it takes 2 arguments:
+=> name of header as first and value is the second one
+
+*when we are seting post method we need also to send data: request(app).post('/users').send({email,password})...
+* when we are checking header we do it like: expect(res.headers['x-auth']).toExist();
+  in order to get value we use bracket notation instead of dot one because our header name has - in it
